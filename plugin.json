@@ -1,0 +1,32 @@
+{
+  "$schema": "https://raw.githubusercontent.com/AvengeMedia/DankMaterialShell/master/quickshell/PLUGINS/plugin-schema.json",
+  "id": "enderPulse",
+  "name": "EnderPulse",
+  "description": "A responsive Cava visualizer for DankBar and the desktop",
+  "version": "1.1.0",
+  "author": "iquantecho",
+  "type": "composite",
+  "capabilities": [
+    "daemon",
+    "dankbar-widget",
+    "desktop-widget",
+    "variants"
+  ],
+  "components": {
+    "daemon": "./EnderPulseService.qml",
+    "widget": "./EnderPulseBar.qml",
+    "desktop": "./EnderPulse.qml"
+  },
+  "settings": "./EnderPulseSettings.qml",
+  "startupCheck": "./StartupCheck.qml",
+  "icon": "graphic_eq",
+  "requires_dms": ">=1.5.1",
+  "dependencies": [
+    "cava"
+  ],
+  "permissions": [
+    "settings_read",
+    "settings_write",
+    "process"
+  ]
+}
