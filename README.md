@@ -6,6 +6,18 @@ as both a compact DankBar widget and a resizable desktop widget. Cava's live
 frequency data can be rendered as Unicode Braille, a spectrum, a mirrored
 pulse, or a radial orbit without modifying DMS itself.
 
+![EnderPulse showing system output and microphone input on opposite sides of DankBar](docs/enderpulse-dankbar-layout.png)
+
+## Why we made it
+
+EnderPulse started because we wanted a balanced, glanceable DankBar: system
+output moving on the left side of the centre and microphone input moving on the
+right. One side shows what the computer is playing while the other shows what
+the microphone is hearing. It grew from that idea into a flexible visualizer
+for other bar layouts and the desktop too.
+
+## Visual styles
+
 ![EnderPulse running on DankMaterialShell](docs/enderpulse-preview.png)
 
 <p align="center">
@@ -38,7 +50,7 @@ through the desktop's normal audio graph.
 
 ## Install
 
-Once EnderPulse is listed in the Dank Linux plugin registry:
+Install EnderPulse from the Dank plugin registry:
 
 ```bash
 dms plugins install enderPulse
@@ -56,6 +68,17 @@ Open **Settings → Plugins** and enable EnderPulse. Add it to DankBar from the
 bar's widget list, add it to the desktop from the desktop widget browser, or
 use both surfaces. Its appearance and audio-source controls are available in
 the plugin settings.
+
+## Configuration
+
+EnderPulse provides separate source, backend, visual-style, size, palette,
+frequency-band, sensitivity, smoothing, glow, and background controls. Plugin
+settings also let you create additional source profiles for DankBar's widget
+picker.
+
+<p align="center">
+  <img src="docs/enderpulse-settings.png" alt="EnderPulse plugin settings in DankMaterialShell" width="420">
+</p>
 
 ## Audio sources
 
