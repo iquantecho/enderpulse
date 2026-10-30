@@ -24,7 +24,7 @@ class ManifestTests(unittest.TestCase):
         self.assertRegex(self.manifest["id"], r"^[a-z][A-Za-z0-9]*$")
         self.assertRegex(self.manifest["version"], r"^\d+\.\d+\.\d+$")
         self.assertEqual(self.manifest["type"], "composite")
-        self.assertEqual(self.manifest["requires_dms"], ">=1.5.1")
+        self.assertEqual(self.manifest["requires_dms"], ">=2.0.0")
         self.assertEqual(self.manifest["dependencies"], ["cava"])
 
     def test_manifest_component_paths_exist(self):

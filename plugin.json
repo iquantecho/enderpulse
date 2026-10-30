@@ -1,9 +1,9 @@
 {
-  "$schema": "https://raw.githubusercontent.com/AvengeMedia/DankMaterialShell/master/quickshell/PLUGINS/plugin-schema.json",
+  "$schema": "https://raw.githubusercontent.com/duxlabs-dev/dux-shell/master/quickshell/PLUGINS/plugin-schema.json",
   "id": "enderPulse",
   "name": "EnderPulse",
-  "description": "A responsive Cava visualizer for DankBar and the desktop",
-  "version": "1.1.0",
+  "description": "A responsive Cava visualizer for the Dux bar, dock, and desktop",
+  "version": "1.2.0",
   "author": "iquantecho",
   "type": "composite",
   "capabilities": [
@@ -20,7 +20,7 @@
   "settings": "./EnderPulseSettings.qml",
   "startupCheck": "./StartupCheck.qml",
   "icon": "graphic_eq",
-  "requires_dms": ">=1.5.1",
+  "requires_dms": ">=2.0.0",
   "dependencies": [
     "cava"
   ],

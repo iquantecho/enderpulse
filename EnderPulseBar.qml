@@ -11,7 +11,10 @@ PluginComponent {
     property var variantData: null
     property var popoutService: null
 
-    pillClickAction: () => popoutService?.openSettingsWithTab("plugins")
+    pillClickAction: () => popoutService?.openSettingsWithTab("plugin:enderPulse")
+
+    // Dux 2 forwards hover to pillClickAction; opening Settings needs a click.
+    function triggerHoverPopout(widgetHostId) {}
 
     readonly property var visualizerData: {
         const shared = root.pluginData ?? ({})
@@ -21,6 +24,8 @@ PluginComponent {
     readonly property int visualizerLength: Math.max(80, Math.min(420, visualizerData.barLength ?? 180))
     readonly property string screenKey: parentScreen?.name ?? "default"
     readonly property string instanceKey: variantId && variantId.length > 0 ? variantId : "default"
+    readonly property string hostKey: (surfaceContext?.kind ?? "bar") + "-"
+        + (surfaceContext?.id ?? barConfig?.id ?? "default")
 
     horizontalBarPill: Component {
         Item {
@@ -29,8 +34,9 @@ PluginComponent {
 
             EnderPulseVisualizer {
                 anchors.fill: parent
+                visible: root.surfaceLive
                 pluginData: root.visualizerData
-                instanceId: "bar-horizontal-" + root.screenKey + "-" + root.instanceKey
+                instanceId: "horizontal-" + root.hostKey + "-" + root.screenKey + "-" + root.widgetInstanceId + "-" + root.instanceKey
                 defaultMode: "spectrum"
                 compact: true
             }
@@ -44,11 +50,12 @@ PluginComponent {
 
             EnderPulseVisualizer {
                 anchors.centerIn: parent
+                visible: root.surfaceLive
                 width: parent.height
                 height: parent.width
                 rotation: -90
                 pluginData: root.visualizerData
-                instanceId: "bar-vertical-" + root.screenKey + "-" + root.instanceKey
+                instanceId: "vertical-" + root.hostKey + "-" + root.screenKey + "-" + root.widgetInstanceId + "-" + root.instanceKey
                 defaultMode: "spectrum"
                 compact: true
             }

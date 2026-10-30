@@ -2,14 +2,15 @@ import QtQuick
 import Quickshell.Io
 import qs.Common
 import qs.Modules.Plugins
-import qs.Widgets
+import qs.DCommon.Widgets
+import "EnderPulseLogic.js" as EnderPulseLogic
 
 PluginSettings {
     id: root
     pluginId: "enderPulse"
 
     property var detectedAudioSources: []
-    property bool profileCreationPending: false
+    property string sourceDetectionError: ""
     readonly property var audioSourceOptions: {
         const options = [
             { label: I18n.tr("System output (automatic)"), value: "system" },
@@ -25,19 +26,29 @@ PluginSettings {
     function loadDetectedSources(output) {
         const options = []
         const seen = ({})
-        const lines = output.split("\n")
-
-        for (let i = 0; i < lines.length; i++) {
-            const fields = lines[i].trim().split(/\s+/)
-            if (fields.length < 2)
+        let sources
+        try {
+            sources = JSON.parse(output)
+            if (!Array.isArray(sources))
+                throw new Error("Expected a source list")
+        } catch (error) {
+            sourceDetectionError = I18n.tr("Audio devices could not be listed. Refresh the list or enter a custom source.")
+            return
+        }
+        sourceDetectionError = ""
+        for (const source of sources) {
+            if (!source || typeof source.name !== "string" || !source.name || seen[source.name])
                 continue
-            const source = fields[1]
-            if (!source || seen[source])
-                continue
-            seen[source] = true
-            const kind = source.endsWith(".monitor")
+            seen[source.name] = true
+            const kind = source.name.endsWith(".monitor")
                 ? I18n.tr("output monitor") : I18n.tr("input")
-            options.push({ label: source + " (" + kind + ")", value: "pulse:" + source })
+            const duplicateName = sources.some(other => other && other.name !== source.name
+                && other.description === source.description)
+            options.push({
+                label: (source.description || source.name)
+                    + (duplicateName ? " — " + source.name : "") + " (" + kind + ")",
+                value: "pulse:" + source.name
+            })
         }
 
         detectedAudioSources = options
@@ -51,41 +62,43 @@ PluginSettings {
     }
 
     function profileExists(target, backend, customSource) {
+        const profile = EnderPulseLogic.sourceProfile(target, backend, customSource)
         return variants.some(function(variant) {
-            return variant.audioTarget === target
-                && (variant.audioBackend ?? "auto") === backend
-                && (variant.customAudioSource ?? "") === customSource
+            const candidate = EnderPulseLogic.sourceProfile(variant.audioTarget,
+                variant.audioBackend ?? "auto", variant.customAudioSource ?? "")
+            return candidate.audioTarget === profile.audioTarget
+                && candidate.audioBackend === profile.audioBackend
+                && candidate.customAudioSource === profile.customAudioSource
         })
     }
 
     function addSourceProfile(target, name) {
-        if (profileCreationPending || !pluginService)
+        if (!pluginService)
             return
         const backend = audioBackendSetting.value
         const customSource = customAudioSourceSetting.value
-        if (profileExists(target, backend, customSource))
+        if (profileExists(target, backend, customSource)
+                || (target === "custom" && !EnderPulseLogic.safeSourceName(customSource, "")))
             return
 
-        profileCreationPending = true
-        const current = pluginService.getPluginVariants(pluginId)
-        const profile = {
-            audioTarget: target,
-            audioBackend: backend,
-            customAudioSource: customSource,
-            icon: "graphic_eq",
-            description: I18n.tr("EnderPulse audio source: ") + sourceLabel(target)
-        }
+        const profile = EnderPulseLogic.sourceProfile(target, backend, customSource)
         profile.id = "source_" + Date.now()
         profile.name = name
-        pluginService.savePluginData(pluginId, "variants", current.concat([profile]))
+        profile.icon = "graphic_eq"
+        profile.description = I18n.tr("EnderPulse audio source: ") + sourceLabel(target)
+        pluginService.savePluginData(pluginId, "variants",
+            pluginService.getPluginVariants(pluginId).concat([profile]))
         loadVariants()
-        profileCreationPending = false
     }
 
     Process {
         id: sourceDetector
-        command: ["sh", "-c", "command -v pactl >/dev/null 2>&1 && pactl list short sources 2>/dev/null || true"]
+        command: ["pactl", "--format=json", "list", "sources"]
         running: false
+        onExited: exitCode => {
+            if (exitCode !== 0)
+                root.sourceDetectionError = I18n.tr("Audio devices could not be listed. Check that pactl and the audio server are available, then refresh.")
+        }
         stdout: StdioCollector {
             onStreamFinished: root.loadDetectedSources(text)
         }
@@ -95,7 +108,7 @@ PluginSettings {
 
     StyledText {
         width: parent.width
-        text: I18n.tr("DankBar widgets")
+        text: I18n.tr("Bar and dock widgets")
         font.pixelSize: Theme.fontSizeLarge
         font.weight: Font.Bold
         color: Theme.surfaceText
@@ -103,7 +116,7 @@ PluginSettings {
 
     StyledText {
         width: parent.width
-        text: I18n.tr("Add System output or Microphone input from Settings → DankBar → Widgets. Adding a widget happens only there; this page configures EnderPulse and optional extra audio-source profiles.")
+        text: I18n.tr("Add System output or Microphone input in Settings → Bar → Widgets, or in the dock editor. Click a visualizer to open these settings; hovering leaves your work alone. Appearance below is shared by both built-in sources.")
         font.pixelSize: Theme.fontSizeSmall
         color: Theme.surfaceVariantText
         wrapMode: Text.WordWrap
@@ -112,14 +125,32 @@ PluginSettings {
     SelectionSetting {
         id: audioTargetSetting
         settingKey: "audioTarget"
-        label: I18n.tr("Audio source")
-        description: I18n.tr("Visualize system output, microphone input, or a specific detected source")
+        label: I18n.tr("Desktop / default audio source")
+        description: I18n.tr("Built-in output and microphone widgets keep their own sources. This selects the desktop/default widget and the source profile below.")
         defaultValue: "system"
         options: root.audioSourceOptions
     }
 
+    DButton {
+        width: parent.width
+        text: I18n.tr("Refresh audio devices")
+        iconName: "refresh"
+        busy: sourceDetector.running
+        enabled: !sourceDetector.running
+        onClicked: sourceDetector.running = true
+    }
+
+    StyledText {
+        width: parent.width
+        visible: root.sourceDetectionError !== ""
+        text: root.sourceDetectionError
+        color: Theme.surfaceText
+        wrapMode: Text.WordWrap
+    }
+
     SelectionSetting {
         id: audioBackendSetting
+        visible: audioTargetSetting.value === "system" || audioTargetSetting.value === "custom"
         settingKey: "audioBackend"
         label: I18n.tr("Cava audio backend")
         description: I18n.tr("Automatic is best for system output; detected sources use PulseAudio compatibility")
@@ -133,16 +164,17 @@ PluginSettings {
 
     StringSetting {
         id: customAudioSourceSetting
+        visible: audioTargetSetting.value === "custom"
         settingKey: "customAudioSource"
         label: I18n.tr("Custom Cava source")
-        description: I18n.tr("Used when Audio source is Custom; accepts a PipeWire object, PulseAudio source, or other Cava source name")
+        description: I18n.tr("Enter a PulseAudio source name, or a PipeWire object.path or object.serial for the selected backend")
         placeholder: "alsa_input… or object.serial"
         defaultValue: ""
     }
 
     StyledText {
         width: parent.width
-        text: I18n.tr("Additional DankBar source")
+        text: I18n.tr("Additional source profile")
         font.pixelSize: Theme.fontSizeMedium
         font.weight: Font.Medium
         color: Theme.surfaceText
@@ -150,13 +182,13 @@ PluginSettings {
 
     StyledText {
         width: parent.width
-        text: I18n.tr("Optional: create another source profile from the selection above. This makes it available in DankBar's widget picker; it does not place it on the bar.")
+        text: I18n.tr("Optional: make the selected source available in the bar or dock widget picker. Creating a profile does not place a widget.")
         font.pixelSize: Theme.fontSizeSmall
         color: Theme.surfaceVariantText
         wrapMode: Text.WordWrap
     }
 
-    DankButton {
+    DButton {
         readonly property bool alreadyAvailable: root.profileExists(
             audioTargetSetting.value,
             audioBackendSetting.value,
@@ -167,7 +199,9 @@ PluginSettings {
             ? I18n.tr("Selected source is already available")
             : I18n.tr("Create source profile")
         iconName: alreadyAvailable ? "check" : "add"
-        enabled: !alreadyAvailable && !root.profileCreationPending
+        wrapText: true
+        enabled: !alreadyAvailable && (audioTargetSetting.value !== "custom"
+            || EnderPulseLogic.safeSourceName(customAudioSourceSetting.value, "") !== "")
         onClicked: root.addSourceProfile(audioTargetSetting.value,
                                          root.sourceLabel(audioTargetSetting.value))
     }
@@ -200,14 +234,23 @@ PluginSettings {
                     anchors.verticalCenter: parent.verticalCenter
                 }
 
-                DankButton {
+                DButton {
                     id: removeButton
-                    text: I18n.tr("Remove profile")
+                    text: I18n.tr("Remove")
+                    Accessible.name: I18n.tr("Remove profile: ") + modelData.name
                     iconName: "delete"
                     onClicked: root.removeVariant(modelData.id)
                 }
             }
         }
+    }
+
+    StyledText {
+        width: parent.width
+        text: I18n.tr("Appearance")
+        font.pixelSize: Theme.fontSizeLarge
+        font.weight: Font.Bold
+        color: Theme.surfaceText
     }
 
     SelectionSetting {
@@ -225,7 +268,7 @@ PluginSettings {
 
     SliderSetting {
         settingKey: "barLength"
-        label: I18n.tr("DankBar length")
+        label: I18n.tr("Bar length")
         description: I18n.tr("Width on a horizontal bar or height on a vertical bar")
         defaultValue: 180
         minimum: 80
@@ -248,7 +291,7 @@ PluginSettings {
     SliderSetting {
         settingKey: "bandCount"
         label: I18n.tr("Frequency bands")
-        description: I18n.tr("More bands show finer audio detail")
+        description: I18n.tr("More bands show finer audio detail and use more rendering work")
         defaultValue: 48
         minimum: 16
         maximum: 96
@@ -257,6 +300,7 @@ PluginSettings {
     SliderSetting {
         settingKey: "sensitivity"
         label: I18n.tr("Sensitivity")
+        description: I18n.tr("Microphones use fixed gain; output monitors adjust automatically")
         defaultValue: 100
         minimum: 20
         maximum: 200
@@ -294,6 +338,7 @@ PluginSettings {
     SliderSetting {
         settingKey: "fadeDelay"
         label: I18n.tr("Fade after silence")
+        description: I18n.tr("Desktop widgets fade out; bar widgets keep their space and clear when silent")
         defaultValue: 4
         minimum: 1
         maximum: 20

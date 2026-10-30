@@ -1,6 +1,7 @@
 import QtQuick
 import qs.Common
 import qs.Modules.Plugins
+import "EnderPulseLogic.js" as EnderPulseLogic
 
 PluginComponent {
     id: root
@@ -26,22 +27,14 @@ PluginComponent {
             builtInVariant("builtin_output", I18n.tr("System output"), "system", "volume_up"),
             builtInVariant("builtin_microphone", I18n.tr("Microphone input"), "microphone", "mic")
         ]
-        const normalized = builtIns.concat(current.filter(function(variant) {
-            return variant.audioTarget !== "system" && variant.audioTarget !== "microphone"
-        }))
+        const normalized = EnderPulseLogic.ensureBuiltInProfiles(current, builtIns)
 
         if (JSON.stringify(current) !== JSON.stringify(normalized))
             pluginService.savePluginData(pluginId, "variants", normalized)
         return true
     }
 
-    Timer {
-        interval: 50
-        running: true
-        repeat: true
-        onTriggered: {
-            if (root.ensureSourceProfiles())
-                stop()
-        }
-    }
+    Component.onCompleted: ensureSourceProfiles()
+    onPluginServiceChanged: ensureSourceProfiles()
+    onPluginIdChanged: ensureSourceProfiles()
 }

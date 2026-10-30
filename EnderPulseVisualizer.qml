@@ -1,7 +1,7 @@
 import QtQuick
 import Quickshell
-import Quickshell.Io
 import qs.Common
+import qs.DCommon.Common
 import "EnderPulseLogic.js" as EnderPulseLogic
 Item {
     id: root
@@ -38,11 +38,7 @@ Item {
     property int activeBandCount: 0
     property bool visibleAfterAudio: false
     property bool ready: false
-    property int retryCount: 0
-    property bool restartPending: false
-    property bool intentionalStop: false
     property string brailleText: ""
-    readonly property int maxRetries: 3
 
     readonly property string safeInstanceKey: {
         return EnderPulseLogic.safeInstanceKey(instanceId)
@@ -69,18 +65,13 @@ Item {
         "bar_delimiter = 59\n" +
         "frame_delimiter = 10\n"
 
-    function safeSourceName(value, fallback) {
-        const cleaned = String(value ?? "").replace(/[\r\n]/g, "").trim()
-        return cleaned.length > 0 ? cleaned : fallback
-    }
-
     function resolveInputSource() {
         if (audioTarget === "microphone")
             return "@DEFAULT_SOURCE@"
         if (audioTarget.indexOf("pulse:") === 0)
-            return safeSourceName(audioTarget.substring(6), "auto")
+            return EnderPulseLogic.safeSourceName(audioTarget.substring(6), "auto")
         if (audioTarget === "custom")
-            return safeSourceName(customAudioSource, "auto")
+            return EnderPulseLogic.safeSourceName(customAudioSource, "auto")
         return "auto"
     }
 
@@ -156,7 +147,7 @@ Item {
             return
 
         if (!renderTimer.running
-                && (compact || frameState.strongest > audioThreshold || visibleAfterAudio))
+                && (frameState.strongest > audioThreshold || visibleAfterAudio))
             renderTimer.start()
     }
 
@@ -185,63 +176,38 @@ Item {
             silenceTimer.restart()
         }
 
-        if (visibleAfterAudio)
+        if (visibleAfterAudio && mode !== "braille")
             visualizer.requestPaint()
     }
 
-    function rebuildCava() {
-        if (!ready)
-            return
-        retryCount = 0
-        restartPending = true
-        restartTimer.restart()
-    }
-
-    function writeConfigAndStart() {
-        if (!ready || !visible) {
-            restartPending = false
-            return
-        }
-        if (configPermissions.running)
-            return
-        restartPending = false
-        configFile.setText(configText)
-        configPermissions.running = true
-    }
-
-    function beginCavaRestart() {
-        if (!ready || !visible) {
-            restartPending = false
-            return
-        }
-
-        retryTimer.stop()
-        if (cavaProcess.running) {
-            intentionalStop = true
-            cavaProcess.running = false
-        } else if (!configPermissions.running) {
-            writeConfigAndStart()
-        }
-    }
-
-    function suspendAudioWork() {
-        restartTimer.stop()
-        retryTimer.stop()
-        renderTimer.stop()
+    function clearVisualization() {
         silenceTimer.stop()
-        restartPending = false
-        frameState.pending = false
+        renderTimer.stop()
         visibleAfterAudio = false
-        if (cavaProcess.running) {
-            intentionalStop = true
-            cavaProcess.running = false
-        }
-        if (configPermissions.running)
-            configPermissions.running = false
+        resetBandBuffers()
+        brailleText = ""
+        visualizer.requestPaint()
     }
 
-    opacity: compact ? 1 : (visibleAfterAudio ? 1 : 0)
+    EnderPulseCapture {
+        id: capture
+        configPath: root.configPath
+        configText: root.configText
+        active: root.ready && root.visible
+        onFrame: line => root.acceptFrame(line)
+        onCapturingChanged: {
+            if (!capturing)
+                root.clearVisualization()
+        }
+    }
+
+    Accessible.role: Accessible.Graphic
+    Accessible.name: I18n.tr("EnderPulse audio visualizer")
+    Accessible.description: capture.errorMessage || root.audioTarget
+
+    opacity: compact || capture.errorMessage ? 1 : (visibleAfterAudio ? 1 : 0)
     Behavior on opacity {
+        enabled: !Style.reduceMotion
         NumberAnimation { duration: 650; easing.type: Easing.InOutCubic }
     }
 
@@ -250,8 +216,7 @@ Item {
         interval: root.fadeDelay
         repeat: false
         onTriggered: {
-            root.visibleAfterAudio = false
-            renderTimer.stop()
+            root.clearVisualization()
         }
     }
 
@@ -272,109 +237,18 @@ Item {
         }
     }
 
-    Timer {
-        id: restartTimer
-        interval: 250
-        repeat: false
-        onTriggered: root.beginCavaRestart()
-    }
-
-    Timer {
-        id: retryTimer
-        interval: 1800
-        repeat: false
-        onTriggered: {
-            if (root.ready && root.visible && !cavaProcess.running
-                    && !configPermissions.running) {
-                root.restartPending = true
-                root.beginCavaRestart()
-            }
-        }
-    }
-
-    FileView {
-        id: configFile
-        path: root.configPath
-        preload: false
-        blockWrites: true
-        atomicWrites: true
-    }
-
-    Process {
-        id: configPermissions
-        command: ["chmod", "600", root.configPath]
-        running: false
-        onRunningChanged: {
-            if (running || !root.ready || !root.visible)
-                return
-            if (root.restartPending) {
-                if (!restartTimer.running)
-                    root.beginCavaRestart()
-            } else {
-                cavaProcess.running = true
-            }
-        }
-    }
-
-    Process {
-        id: cavaProcess
-        command: ["cava", "-p", root.configPath]
-        running: false
-        onRunningChanged: {
-            if (running || !root.ready)
-                return
-
-            if (root.intentionalStop) {
-                root.intentionalStop = false
-                if (root.restartPending && !restartTimer.running)
-                    root.beginCavaRestart()
-            } else if (root.visible && root.retryCount < root.maxRetries) {
-                root.retryCount++
-                retryTimer.restart()
-            }
-        }
-
-        stdout: SplitParser {
-            splitMarker: "\n"
-            onRead: function(line) { root.acceptFrame(line) }
-        }
-    }
-
     Component.onCompleted: {
         resetBandBuffers()
         ready = true
-        rebuildCava()
     }
-    Component.onDestruction: {
-        ready = false
-        silenceTimer.stop()
-        renderTimer.stop()
-        retryTimer.stop()
-        restartTimer.stop()
-        restartPending = false
-        intentionalStop = true
-        cavaProcess.running = false
-        configPermissions.running = false
-    }
-    onVisibleChanged: {
-        if (!ready)
-            return
-        if (visible)
-            rebuildCava()
+    onVisibleChanged: if (ready && !visible) clearVisualization()
+    onBandCountChanged: if (ready) clearVisualization()
+    onModeChanged: {
+        if (mode === "braille")
+            brailleText = makeBrailleText(activeBandCount)
         else
-            suspendAudioWork()
+            visualizer.requestPaint()
     }
-    onBandCountChanged: {
-        if (ready) {
-            resetBandBuffers()
-            rebuildCava()
-        }
-    }
-    onSensitivityChanged: if (ready) rebuildCava()
-    onAudioTargetChanged: if (ready) rebuildCava()
-    onAudioBackendChanged: if (ready) rebuildCava()
-    onCustomAudioSourceChanged: if (ready && audioTarget === "custom") rebuildCava()
-    onModeChanged: visualizer.requestPaint()
     onPaletteChanged: visualizer.requestPaint()
     onGlowChanged: visualizer.requestPaint()
 
@@ -386,15 +260,28 @@ Item {
     }
 
     Text {
+        anchors.centerIn: parent
+        width: parent.width
+        visible: capture.errorMessage !== "" && !capture.capturing
+        text: root.compact ? I18n.tr("Audio unavailable") : I18n.tr("Audio unavailable: ") + capture.errorMessage
+        color: Theme.surfaceText
+        font.family: Theme.fontFamily
+        font.pixelSize: Theme.fontSizeSmall
+        horizontalAlignment: Text.AlignHCenter
+        wrapMode: Text.Wrap
+    }
+
+    Text {
         anchors.fill: parent
         anchors.margins: root.compact ? 1 : 12
         visible: root.mode === "braille"
         text: root.brailleText
         color: root.paletteColor(0.5)
         font.family: "monospace"
-        font.pixelSize: root.compact
-            ? Math.max(8, Math.min(height * 0.78, width / Math.max(1, text.length) * 1.65))
-            : Math.max(8, height * 0.42)
+        font.pixelSize: Math.max(1, height * (root.compact ? 0.78 : 0.42))
+        fontSizeMode: Text.Fit
+        minimumPixelSize: 1
+        maximumLineCount: 1
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter
         elide: Text.ElideRight
@@ -429,9 +316,9 @@ Item {
             if (root.mode === "radial") {
                 const cx = w / 2
                 const cy = h / 2
-                const base = Math.max(12, Math.min(w, h) * 0.19)
-                const reach = Math.max(10, Math.min(w, h) * 0.29)
-                const lineWidth = Math.max(1.5, Math.min(5, Math.min(w, h) / 90))
+                const base = Math.min(w, h) * 0.19
+                const reach = Math.min(w, h) * 0.26
+                const lineWidth = Math.max(0.5, Math.min(5, Math.min(w, h) / 90))
 
                 ctx.lineWidth = lineWidth
                 for (let i = 0; i < count; i++) {
@@ -473,8 +360,8 @@ Item {
                 return
             }
 
-            const gap = Math.max(1, w / count * 0.18)
-            const bandWidth = Math.max(1, (w - gap * (count - 1)) / count)
+            const gap = w / count * 0.18
+            const bandWidth = (w - gap * (count - 1)) / count
             const mirrored = root.mode === "mirror"
             const available = mirrored ? h * 0.46 : h * 0.9
 
